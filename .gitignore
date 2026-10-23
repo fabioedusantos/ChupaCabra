@@ -1,0 +1,21 @@
+.env
+.env.*
+!.env.example
+**/vendor/
+**/node_modules/
+web/dist/
+backend/docker/production/data/
+web/docker/production/data/
+backend/docker/production/legacy-layout-backup/
+web/docker/production/legacy-layout-backup/
+backend/docker/production/database/legacy-data.sql
+*.log
+.DS_Store
+.idea/
+.vscode/
+# TLS e estado histórico do Caddy (não pertencem ao código publicado)
+web/docker/production/caddy/data/
+web/docker/production/caddy/config/
+**/*.key
+**/*.pem
+**/autosave.json

@@ -1,0 +1,14 @@
+# Mantém os mesmos hostnames e portas da instalação antiga.
+# O Cloudflare Tunnel continua apontando para http://caddy:80.
+(chupacabra_app) {
+    encode zstd gzip
+    reverse_proxy web:80
+}
+
+http://chupacabra.fbsantos.com.br {
+    import chupacabra_app
+}
+
+https://chupacabra.fbsantos.com.br {
+    import chupacabra_app
+}

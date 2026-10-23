@@ -1,0 +1,11 @@
+# Never transfer bind-mounted MariaDB/Redis data or backups into the image.
+docker/production/data/
+docker/production/legacy-layout-backup/
+docker/production/database/legacy-data.sql
+docker/production/database/tauste-sources.sql
+**/.env
+**/.env.*
+**/vendor/
+**/node_modules/
+**/.git/
+*.log

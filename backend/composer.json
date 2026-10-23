@@ -1,0 +1,18 @@
+{
+  "name": "familia/chupacabra",
+  "description": "API e orquestração do ChupaCabra",
+  "type": "project",
+  "require": {
+    "php": "^8.5",
+    "ext-curl": "*",
+    "ext-dom": "*",
+    "ext-mbstring": "*",
+    "ext-pdo_mysql": "*",
+    "ext-json": "*",
+    "slim/slim": "^4.15.3",
+    "slim/psr7": "^1.7",
+    "predis/predis": "^3.0"
+  },
+  "autoload": {"psr-4": {"ChupaCabra\\": "src/"}},
+  "config": {"sort-packages": true}
+}

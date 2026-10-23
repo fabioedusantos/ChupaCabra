@@ -1,0 +1,155 @@
+name: chupacabra
+services:
+  db:
+    image: mariadb:11.8
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${DB_NAME:-chupacabra}
+      MARIADB_USER: ${DB_USER:-chupacabra}
+      MARIADB_PASSWORD: ${DB_PASSWORD:?Configure DB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?Configure DB_ROOT_PASSWORD}
+      TZ: ${TZ:-America/Sao_Paulo}
+    volumes:
+      - ./backend/docker/production/data/db:/var/lib/mysql
+    # A porta do MariaDB no contêiner permanece 3306; acesso HeidiSQL via host:3308.
+    # Para restringir a exposição, defina DB_BIND_IP com o IP LAN do servidor
+    # ou 127.0.0.1 se utilizar o túnel SSH do HeidiSQL.
+    ports:
+      - "${DB_BIND_IP:-127.0.0.1}:${DB_EXTERNAL_PORT:-3308}:3306"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    networks: [private]
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["/bin/sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\" --save 60 1000"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Configure REDIS_PASSWORD}
+    volumes:
+      - ./backend/docker/production/data/redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping 2>/dev/null | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    networks: [private]
+  api:
+    build:
+      context: ./backend
+      dockerfile: docker/production/Dockerfile
+    restart: unless-stopped
+    environment: &backend_env
+      APP_ENV: ${APP_ENV:-production}
+      TZ: ${TZ:-America/Sao_Paulo}
+      COOKIE_SECURE: ${COOKIE_SECURE:-1}
+      SESSION_LIFETIME_DAYS: ${SESSION_LIFETIME_DAYS:-30}
+      SESSION_RENEW_ON_ACTIVITY: ${SESSION_RENEW_ON_ACTIVITY:-1}
+      AUTH_USERS_B64: ${AUTH_USERS_B64:-}
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-chupacabra}
+      DB_USER: ${DB_USER:-chupacabra}
+      DB_PASSWORD: ${DB_PASSWORD:?Configure DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Configure REDIS_PASSWORD}
+      SCRAPE_HOSTS: ${SCRAPE_HOSTS:-www.confianca.com.br,tauste.com.br,www.tauste.com.br}
+      SCRAPE_MAX_PAGES: ${SCRAPE_MAX_PAGES:-200}
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "php-fpm", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks: [private]
+  # Executa as migrations ANTES de liberar API, worker e scheduler.
+  # Serviço de execução única: falhas impedem a aplicação de iniciar.
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: docker/production/Dockerfile
+    restart: "no"
+    command: ["php", "/app/bin/migrate.php"]
+    environment: *backend_env
+    depends_on:
+      db: {condition: service_healthy}
+    networks: [private]
+  worker:
+    # Cinco processos independentes consumindo a mesma fila Redis.
+    # O Compose respeita este número também após um simples up -d.
+    scale: 5
+    build: {context: ./backend, dockerfile: docker/production/Dockerfile}
+    restart: unless-stopped
+    command: ["php", "/app/bin/worker.php"]
+    environment: *backend_env
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    networks: [private]
+  scheduler:
+    build: {context: ./backend, dockerfile: docker/production/Dockerfile}
+    restart: unless-stopped
+    command: ["php", "/app/bin/scheduler.php"]
+    environment: *backend_env
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    networks: [private]
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    # Mantém o mesmo nome do conector antigo; ele deve ser substituído uma única vez.
+    container_name: chupacabra-cloudflared
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      # Compatível com a variável do projeto antigo, sem expor o token no YAML.
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-${CHUPACABRA_TUNNEL_TOKEN:-}}
+    depends_on:
+      caddy: {condition: service_started}
+    # Na mesma rede Docker do Caddy para preservar http://caddy:80.
+    networks: [legacy_tunnel]
+  web:
+    build: {context: ./web, dockerfile: docker/production/Dockerfile}
+    restart: unless-stopped
+    expose:
+      - "80"
+    depends_on:
+      api: {condition: service_healthy}
+    networks: [private]
+  caddy:
+    image: caddy:2
+    container_name: chupacabra-caddy
+    restart: unless-stopped
+    depends_on: [web]
+    volumes:
+      - ./web/docker/production/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Caddy persiste dentro da raiz do projeto; o .env pode sobrescrever estes caminhos.
+      - ${CADDY_DATA_DIR:-./web/docker/production/data/caddy/data}:/data
+      - ${CADDY_CONFIG_DIR:-./web/docker/production/data/caddy/config}:/config
+    networks:
+      private: {}
+      # O cloudflared deste Compose continua usando http://caddy:80.
+      legacy_tunnel:
+        aliases: [caddy]
+      # Instalação particular: IP e MAC devem ser definidos no .env privado.
+      # Sem defaults particulares no código publicado.
+      orangepi_lan:
+        ipv4_address: ${CADDY_LAN_IP:?Configure CADDY_LAN_IP no .env privado}
+        mac_address: ${CADDY_LAN_MAC:?Configure CADDY_LAN_MAC no .env privado}
+networks:
+  private:
+    driver: bridge
+  legacy_tunnel:
+    name: chupacabra-internal
+    driver: bridge
+  orangepi_lan:
+    external: true
+    name: orangepi-lan

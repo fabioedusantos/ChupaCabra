@@ -1,0 +1,10 @@
+node_modules/
+dist/
+docker/production/data/
+docker/production/legacy-layout-backup/
+**/.env
+**/.env.*
+**/.git/
+*.log
+docker/production/caddy/data/
+docker/production/caddy/config/

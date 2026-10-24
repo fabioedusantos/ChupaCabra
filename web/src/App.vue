@@ -9,6 +9,8 @@ const items=ref([]),editItems=ref([]),products=ref([]),searchText=ref(''),search
 const listFilter=ref(''),statusFilter=ref('pending'),marketFilter=ref('all')
 const statusOptions=[{value:'pending',label:'Pendentes'},{value:'bought',label:'Comprados'},{value:'all',label:'Todos'}]
 const replacingId=ref(null),searchInput=ref(null),sources=ref([]),jobs=ref([]),attempts=ref([]),selectedMarket=ref('all')
+const marketInfo=ref([]),sourceDraft=ref(null),addingSource=ref(false),sourceBusy=ref(false)
+const newSource=ref({supermercado:'confianca',categoria:'',url:'',enabled:true})
 const queuePaused=ref(false),imagePreview=ref(''),jobView=ref('running'),clock=ref(Date.now()),jobsLoading=ref(false)
 const closing=ref(false),receiptTotal=ref(''),purchaseNote=ref(''),receiptInput=ref(null)
 const reportMonths=ref('3'),reportLoading=ref(false),report=ref(null),purchaseDetail=ref(null),detailLoading=ref(false)
@@ -21,6 +23,11 @@ const detailMarkets=computed(()=>{const groups=[];for(const item of purchaseDeta
 const differenceLabel=value=>Number(value)>0?'Economia frente ao estimado':Number(value)<0?'Acima do estimado':'Dentro do estimado'
 let tempId=-1,searchTimer,toastTimer,pollTimer,tickTimer,requestNumber=0
 const markets={confianca:'Confiança',tauste:'Tauste'}
+// A administração lista todos os raspadores; compras só mostram lojas úteis.
+const availableMarkets=computed(()=>Object.entries(markets).filter(([id])=>
+  marketInfo.value.some(m=>m.alias===id&&m.visible) || items.value.some(i=>i.supermercado===id)
+))
+const canShowMarketFilter=computed(()=>availableMarkets.value.length>1)
 const money=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v||0))
 const number=v=>new Intl.NumberFormat('pt-BR',{maximumFractionDigits:2}).format(Number(v||0))
 const norm=v=>String(v||'').toLocaleLowerCase('pt-BR').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
@@ -80,8 +87,9 @@ function previewItem(item,event) {
 }
 function flash(msg,isError=false){notice.value=isError?'':msg;error.value=isError?msg:'';clearTimeout(toastTimer);toastTimer=setTimeout(()=>{notice.value='';error.value=''},4800)}
 async function api(path,method='GET',payload=null){const headers={Accept:'application/json'};if(payload!==null)headers['Content-Type']='application/json';if(session.value?.csrf&&method!=='GET')headers['X-CSRF-Token']=session.value.csrf;let response;try{response=await fetch('/api'+path,{method,credentials:'same-origin',headers,body:payload===null?undefined:JSON.stringify(payload)})}catch{throw new Error('Não foi possível conectar ao servidor.')}const data=await response.json().catch(()=>({}));if(!response.ok){if(response.status===401&&path!=='/auth/login')session.value=null;throw new Error(data.error||'Falha ao concluir operação.')}return data}
-async function init(){ready.value=false;try{const r=await api('/auth/session');session.value=r.authenticated?r:null;if(session.value){await loadShopping();if(page.value==='edit')editItems.value=items.value.map(x=>({...x}))}}catch(e){flash(e.message,true)}finally{ready.value=true}}
-async function login(){authLoading.value=true;try{const s=await api('/auth/login','POST',{username:username.value,password:password.value});session.value={authenticated:true,...s};password.value='';await loadShopping();if(page.value==='edit')editItems.value=items.value.map(x=>({...x}));await showPage(validPage(),false)}catch(e){flash(e.message,true)}finally{authLoading.value=false}}
+async function loadMarketInfo(){const r=await api('/markets');marketInfo.value=r.markets||[];if(marketFilter.value!=='all'&&!availableMarkets.value.some(([id])=>id===marketFilter.value))marketFilter.value='all'}
+async function init(){ready.value=false;try{const r=await api('/auth/session');session.value=r.authenticated?r:null;if(session.value){await loadShopping();await loadMarketInfo();if(page.value==='edit')editItems.value=items.value.map(x=>({...x}))}}catch(e){flash(e.message,true)}finally{ready.value=true}}
+async function login(){authLoading.value=true;try{const s=await api('/auth/login','POST',{username:username.value,password:password.value});session.value={authenticated:true,...s};password.value='';await loadShopping();await loadMarketInfo();if(page.value==='edit')editItems.value=items.value.map(x=>({...x}));await showPage(validPage(),false)}catch(e){flash(e.message,true)}finally{authLoading.value=false}}
 async function logout(){try{await api('/auth/logout','POST',{})}catch{}session.value=null;items.value=[];report.value=null;closing.value=false;page.value='list';history.replaceState({},'','/compras')}
 async function loadShopping(){const r=await api('/shopping');items.value=r.items||[]}
 async function showPage(id,push=true){if(!routes[id])return;const previous=page.value;page.value=id;error.value='';if(push&&location.pathname!==routes[id])history.pushState({},'',routes[id]);if(id==='edit'&&previous!=='edit'){editItems.value=items.value.map(x=>({...x}));searchText.value='';products.value=[];replacingId.value=null}if(id==='jobs')await loadJobs();if(id==='reports')await loadReports();window.scrollTo({top:0,behavior:'instant'})}
@@ -200,7 +208,36 @@ async function clear(){if(!confirm('Excluir todos os itens da lista compartilhad
 function onKeydown(e){if(e.key==='Escape'){imagePreview.value='';closeClosing()}}
 function scrollTop(){window.scrollTo({top:0,behavior:'smooth'})}
 
-async function loadJobs(){if(jobsLoading.value)return;jobsLoading.value=true;try{const [ss,jj]=await Promise.all([api('/sources'),api('/jobs')]);sources.value=ss.sources||[];jobs.value=jj.jobs||[];attempts.value=jj.attempts||[];queuePaused.value=!!jj.paused}catch(e){flash(e.message,true)}finally{jobsLoading.value=false}}
+async function loadJobs(){if(jobsLoading.value)return;jobsLoading.value=true;try{const [ss,jj,mm]=await Promise.all([api('/sources'),api('/jobs'),api('/markets')]);sources.value=ss.sources||[];jobs.value=jj.jobs||[];attempts.value=jj.attempts||[];marketInfo.value=mm.markets||[];queuePaused.value=!!jj.paused}catch(e){flash(e.message,true)}finally{jobsLoading.value=false}}
+function startSourceEdit(source){
+  addingSource.value=false
+  sourceDraft.value={uid:source.uid,supermercado:source.supermercado,categoria:source.categoria,url:source.url,enabled:!!Number(source.enabled)}
+}
+function cancelSourceEdit(){sourceDraft.value=null}
+function showSourceAdd(){sourceDraft.value=null;addingSource.value=!addingSource.value;newSource.value={supermercado:'confianca',categoria:'',url:'',enabled:true}}
+async function submitSource(source){
+  if(sourceBusy.value)return
+  sourceBusy.value=true
+  try{
+    const uid=source.uid
+    const payload={supermercado:source.supermercado,categoria:source.categoria.trim(),url:source.url.trim(),enabled:!!source.enabled}
+    await api(uid?'/sources/'+encodeURIComponent(uid):'/sources',uid?'PUT':'POST',payload)
+    flash(uid?'Fonte atualizada.':'Fonte cadastrada. Ela entrará na próxima importação automática.')
+    sourceDraft.value=null;addingSource.value=false
+    await loadJobs()
+  }catch(e){flash(e.message,true)}finally{sourceBusy.value=false}
+}
+async function setSourceEnabled(source){
+  if(sourceBusy.value)return
+  if(Number(source.enabled)&&!confirm('Desativar esta fonte? Importações pendentes serão dispensadas, sem remover produtos já importados nem o histórico.'))return
+  await submitSource({...source,enabled:!Number(source.enabled)})
+}
+async function removeSource(source){
+  if(sourceBusy.value||!confirm('Excluir definitivamente a fonte '+source.categoria+'? Fontes com histórico só podem ser desativadas.'))return
+  sourceBusy.value=true
+  try{await api('/sources/'+encodeURIComponent(source.uid),'DELETE');flash('Fonte excluída.');await loadJobs()}
+  catch(e){flash(e.message,true)}finally{sourceBusy.value=false}
+}
 async function run(source){if(busy.value||queuePaused.value)return;busy.value=true;try{await api('/sources/'+encodeURIComponent(source.uid)+'/run','POST',{});flash('Categoria adicionada à fila de processamento.');await loadJobs()}catch(e){flash(e.message,true)}finally{busy.value=false}}
 async function runMarket(market){if(busy.value||queuePaused.value||!confirm('Reprocessar todas as categorias de '+markets[market]+'?'))return;busy.value=true;try{const r=await api('/markets/'+market+'/run','POST',{});flash(r.job_ids.length+' categorias enfileiradas.');await loadJobs()}catch(e){flash(e.message,true)}finally{busy.value=false}}
 async function runAll(){
@@ -291,7 +328,7 @@ onUnmounted(()=>{window.removeEventListener('popstate',popState);window.removeEv
             <div class="heading-actions"><button v-if="items.length&&pending===0" class="button purchase-finish" :disabled="busy" @click="openClosing">✓ Encerrar compra</button><button class="button primary shopping-edit-button" @click="showPage('edit')">＋ Editar lista</button></div>
           </header>
           <div v-if="items.length&&pending===0" class="closing-banner" role="status"><span class="closing-banner-symbol">✓</span><div><strong>Todos os produtos foram marcados!</strong><p>Registre o total do cupom fiscal para comparar o gasto real com o valor estimado. Os preços serão guardados no histórico.</p></div><button class="button primary" :disabled="busy" @click="openClosing">Encerrar compra →</button></div>
-          <section class="panel shopping-panel"><div class="panel-heading shopping-panel-heading"><div><h2>O que levar?</h2><p class="muted">Marque como comprado ou amplie a foto do produto.</p></div><button class="button outline small" @click="loadShopping">↻ Atualizar</button></div><div class="filters"><input v-model="listFilter" type="search" placeholder="⌕ Buscar produto ou observação" aria-label="Buscar na lista"/><div class="status-toggle" role="group" aria-label="Filtrar por situação de compra"><button v-for="option in statusOptions" :key="option.value" type="button" :class="{active:statusFilter===option.value}" :aria-pressed="statusFilter===option.value" @click="statusFilter=option.value">{{option.label}} <span class="status-count">{{statusCounts[option.value]}}</span></button></div><select v-model="marketFilter" aria-label="Filtrar supermercado"><option value="all">Todos os mercados</option><option value="confianca">Confiança</option><option value="tauste">Tauste</option></select></div>
+          <section class="panel shopping-panel"><div class="panel-heading shopping-panel-heading"><div><h2>O que levar?</h2><p class="muted">Marque como comprado ou amplie a foto do produto.</p></div><button class="button outline small" @click="loadShopping">↻ Atualizar</button></div><div class="filters"><input v-model="listFilter" type="search" placeholder="⌕ Buscar produto ou observação" aria-label="Buscar na lista"/><div class="status-toggle" role="group" aria-label="Filtrar por situação de compra"><button v-for="option in statusOptions" :key="option.value" type="button" :class="{active:statusFilter===option.value}" :aria-pressed="statusFilter===option.value" @click="statusFilter=option.value">{{option.label}} <span class="status-count">{{statusCounts[option.value]}}</span></button></div><select v-if="canShowMarketFilter" v-model="marketFilter" aria-label="Filtrar supermercado"><option value="all">Todos os mercados</option><option v-for="[id,name] in availableMarkets" :key="id" :value="id">{{name}}</option></select></div>
             <div v-if="!visible.length" class="empty"><div class="empty-icon">🛒</div><h3>{{items.length&&pending===0&&statusFilter==='pending'?'Compra concluída!':items.length?'Nada neste filtro':'A lista ainda está vazia'}}</h3><p>{{items.length&&pending===0&&statusFilter==='pending'?'Todos os itens já foram marcados. Parabéns!':items.length?'Experimente outro filtro ou confira os comprados.':'Pesquise produtos e prepare a próxima compra.'}}</p><button class="button primary" @click="showPage('edit')">Montar lista</button></div>
             <div v-for="group in grouped" :key="group.key" class="group"><div class="group-heading"><span class="market-dot" :class="group.market"></span><strong>{{markets[group.market]||group.market}} · {{group.category}}</strong><small>{{group.items.length}} {{group.items.length===1?'item':'itens'}}</small></div><div v-for="item in group.items" :key="item.id" class="shopping-item" :class="{bought:Number(item.oculto)}"><button class="check" :class="{checked:Number(item.oculto)}" :aria-label="Number(item.oculto)?'Voltar para pendentes':'Marcar como comprado'" @click="toggle(item)" :disabled="busy">{{Number(item.oculto)?'✓':''}}</button><button type="button" class="thumb" :disabled="!itemImage(item)" @click="previewItem(item,$event)" :aria-label="'Ampliar foto de '+item.titulo"><span class="thumb-placeholder" aria-hidden="true">◈</span><img v-if="itemImage(item)" :src="itemImage(item)" loading="lazy" :alt="'Foto de '+item.titulo" @error="imageError($event,item)"/></button><div class="product-main"><strong>{{item.titulo}}</strong><small v-if="item.observacao" class="note">✎ {{item.observacao}}</small><small v-else class="muted">{{item.categoria}}</small><button class="shopping-swap" type="button" @click="replaceFromShopping(item)" :aria-label="'Substituir '+item.titulo">↔ Trocar produto</button></div><div class="product-meta"><strong>{{number(item.qtd)}} × {{money(item.preco_atual??item.preco)}}</strong><span>{{money(itemValue(item))}}</span></div></div></div>
             <div v-if="items.length" class="list-footer"><button class="link-btn" :disabled="busy||!boughtItems" @click="restore">↶ Reiniciar comprados <span v-if="boughtItems">({{boughtItems}})</span></button><button class="link-btn danger" :disabled="busy" @click="clear">Esvaziar lista</button></div>
@@ -419,15 +456,33 @@ onUnmounted(()=>{window.removeEventListener('popstate',popState);window.removeEv
 
           <div class="import-dashboard-grid">
             <section class="panel sources-accordion">
-              <div class="panel-heading"><div><h2>Fontes e desempenho <span class="count">{{activeSourceCount}}</span></h2><p class="muted">Última importação por categoria. Clique no mercado para expandir.</p></div></div>
+              <div class="panel-heading source-heading"><div><h2>Fontes e desempenho <span class="count">{{activeSourceCount}}</span></h2><p class="muted">Configure categorias e URLs. Novos mercados exigem desenvolvimento do raspador.</p></div><button type="button" class="button outline small" :disabled="sourceBusy" @click="showSourceAdd">{{addingSource?'Cancelar':'＋ Nova fonte'}}</button></div>
+              <form v-if="addingSource" class="source-form add-source-form" @submit.prevent="submitSource(newSource)">
+                <h3>Cadastrar categoria</h3>
+                <div class="source-fields"><label>Supermercado<select v-model="newSource.supermercado"><option v-for="(name,id) in markets" :key="id" :value="id">{{name}}</option></select></label><label>Categoria<input v-model="newSource.categoria" maxlength="100" required placeholder="Ex.: Hortifruti"/></label></div>
+                <label>Endereço da categoria (HTTPS)<input v-model="newSource.url" type="url" maxlength="2048" required placeholder="https://www.exemplo.com.br/categoria"/></label>
+                <label class="source-check"><input v-model="newSource.enabled" type="checkbox"/> Ativar importação automática</label>
+                <div class="source-form-actions"><button type="button" class="button outline small" @click="addingSource=false">Cancelar</button><button type="submit" class="button primary small" :disabled="sourceBusy">Salvar fonte</button></div>
+              </form>
               <div class="source-market-list">
                 <details v-for="(m,i) in marketSources" :key="m.id" class="source-market" :open="i===0">
                   <summary><span class="market-icon" :class="m.id">{{m.id==='confianca'?'C':'T'}}</span><strong>{{m.name}}</strong><small>{{m.entries.length}} categorias</small><span class="chevron">⌄</span></summary>
-                  <div class="source-row" v-for="s in m.entries" :key="s.uid">
-                    <div class="source-name"><strong>{{s.categoria}}</strong><small :title="s.url">{{s.url}}</small></div>
-                    <div class="source-last" v-if="latestFor(s.uid)"><span class="state" :class="latestFor(s.uid).status">{{jobLabels[latestFor(s.uid).status]}}</span><small>{{number(latestFor(s.uid).products_count)}} produtos · {{jobTime(latestFor(s.uid))}}</small><small :title="absoluteImportDate(latestFor(s.uid).finished_at||latestFor(s.uid).created_at)">{{importDate(latestFor(s.uid).finished_at||latestFor(s.uid).created_at)}}</small></div>
-                    <div class="source-last" v-else><small>Ainda não importada</small></div>
-                    <button type="button" class="button outline small" :disabled="busy||queuePaused||!Number(s.enabled)" :aria-label="'Reprocessar '+s.categoria+' do '+m.name" :title="'Reprocessar '+s.categoria" @click="run(s)">↻</button>
+                  <div class="source-row" v-for="s in m.entries" :key="s.uid" :class="{'source-off':!Number(s.enabled)}">
+                    <template v-if="sourceDraft?.uid===s.uid">
+                      <form class="source-form source-inline-form" @submit.prevent="submitSource(sourceDraft)">
+                        <h3>Editar · {{m.name}}</h3>
+                        <label>Categoria<input v-model="sourceDraft.categoria" maxlength="100" required/></label>
+                        <label>URL da categoria<input v-model="sourceDraft.url" type="url" maxlength="2048" required/></label>
+                        <label class="source-check"><input v-model="sourceDraft.enabled" type="checkbox"/> Fonte ativa</label>
+                        <div class="source-form-actions"><button type="button" class="button outline small" @click="cancelSourceEdit">Cancelar</button><button type="submit" class="button primary small" :disabled="sourceBusy">Salvar alterações</button></div>
+                      </form>
+                    </template>
+                    <template v-else>
+                      <div class="source-name"><strong>{{s.categoria}} <span v-if="!Number(s.enabled)" class="source-inactive">Inativa</span></strong><small :title="s.url">{{s.url}}</small></div>
+                      <div class="source-last" v-if="latestFor(s.uid)"><span class="state" :class="latestFor(s.uid).status">{{jobLabels[latestFor(s.uid).status]}}</span><small>{{number(latestFor(s.uid).products_count)}} produtos · {{jobTime(latestFor(s.uid))}}</small><small :title="absoluteImportDate(latestFor(s.uid).finished_at||latestFor(s.uid).created_at)">{{importDate(latestFor(s.uid).finished_at||latestFor(s.uid).created_at)}}</small></div>
+                      <div class="source-last" v-else><small>Ainda não importada</small></div>
+                      <div class="source-actions"><button type="button" class="button outline small" :disabled="busy||queuePaused||!Number(s.enabled)" :aria-label="'Reprocessar '+s.categoria+' do '+m.name" title="Reprocessar agora" @click="run(s)">↻</button><button type="button" class="button outline small" :disabled="sourceBusy" title="Editar categoria e endereço" :aria-label="'Editar '+s.categoria" @click="startSourceEdit(s)">✎</button><button type="button" class="button outline small" :disabled="sourceBusy" :title="Number(s.enabled)?'Desativar fonte':'Ativar fonte'" @click="setSourceEnabled(s)">{{Number(s.enabled)?'⏸':'▶'}}</button><button v-if="!latestFor(s.uid)" type="button" class="button outline small" :disabled="sourceBusy" title="Excluir fonte sem histórico" @click="removeSource(s)">×</button></div>
+                    </template>
                   </div>
                 </details>
               </div>

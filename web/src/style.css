@@ -479,3 +479,29 @@ body{background:var(--paper);color:var(--ink)}
 /* Backlog consolidado: não confundir tarefas dispensadas com falhas. */
 .state.superseded{background:#eef0f5;color:#62708a}
 .job-error.job-info{background:#f4f6fa;border-color:#dfe5ef;color:#5f6d87}
+
+/* Fontes de importação: gestão acessível sem transformar a página em formulário gigante. */
+.page-jobs .source-heading{flex-wrap:wrap;gap:10px}
+.page-jobs .source-row{grid-template-columns:minmax(0,1fr) minmax(105px,auto) auto}
+.page-jobs .source-row.source-off{background:#f7f8fb}
+.page-jobs .source-off .source-name{opacity:.68}
+.page-jobs .source-inactive{font-size:.63rem;color:#9a5c20;background:#fff0dc;padding:2px 6px;border-radius:6px;white-space:nowrap}
+.page-jobs .source-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px;align-items:center}
+.page-jobs .source-row .source-actions .button{padding:5px 7px;min-width:30px}
+.page-jobs .source-form{display:grid;gap:10px;min-width:0;background:#f8faff}
+.page-jobs .add-source-form{padding:16px;border-bottom:1px solid #dce5f5}
+.page-jobs .source-inline-form{grid-column:1/-1;width:100%;padding:7px 2px}
+.page-jobs .source-form h3{font-size:.83rem;margin:0;color:#203b6a}
+.page-jobs .source-fields{display:grid;grid-template-columns:1fr 1.6fr;gap:10px}
+.page-jobs .source-form label{display:grid;gap:5px;color:#566580;font-size:.7rem;font-weight:750;min-width:0}
+.page-jobs .source-form input:not([type=checkbox]),.page-jobs .source-form select{width:100%;min-height:39px;min-width:0;border:1px solid #d5ddea;border-radius:9px;background:#fff;padding:8px 10px;font:inherit;color:#23344c}
+.page-jobs .source-form input:focus,.page-jobs .source-form select:focus{outline:2px solid #aec2ed}
+.page-jobs .source-form .source-check{display:flex;align-items:center;gap:8px;line-height:1.3}
+.page-jobs .source-check input{accent-color:#173f8b;width:16px;height:16px}
+.page-jobs .source-form-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+@media(max-width:650px){
+ .page-jobs .source-row{grid-template-columns:minmax(0,1fr) auto}
+ .page-jobs .source-row .source-actions{grid-column:2;grid-row:1/3;max-width:90px}
+ .page-jobs .source-row .source-actions .button{grid-column:auto;grid-row:auto}
+ .page-jobs .source-fields{grid-template-columns:1fr}
+}

@@ -10,6 +10,7 @@ use ChupaCabra\Shopping;
 use ChupaCabra\PurchaseHistory;
 use ChupaCabra\ProductImages;
 use ChupaCabra\Jobs;
+use ChupaCabra\Sources;
 use Slim\Factory\AppFactory;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -25,6 +26,7 @@ $shopping=new Shopping($db);
 $purchases=new PurchaseHistory($db);
 $productImages=new ProductImages($db);
 $jobs=new Jobs($db,Bootstrap::redis());
+$sourcesAdmin=new Sources($db);
 
 function jsonResponse(Response $response, mixed $data, int $status=200): Response {
     $response->getBody()->write(json_encode($data,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR|JSON_INVALID_UTF8_SUBSTITUTE));
@@ -106,6 +108,18 @@ $app->post('/api/purchases', function(Request $rq,Response $rs) use($auth,$purch
     return jsonResponse($rs,['purchase'=>$purchases->close($data['actual_total'],$data['note']??'',(string)$session['username'])],201);
 });
 
+$app->get('/api/markets',function(Request $rq,Response $rs) use($auth,$sourcesAdmin) {
+    $auth->requireSession();return jsonResponse($rs,['markets'=>$sourcesAdmin->markets()]);
+});
+$app->post('/api/sources',function(Request $rq,Response $rs) use($auth,$sourcesAdmin) {
+    $auth->requireSession(true);return jsonResponse($rs,['source'=>$sourcesAdmin->save(bodyData($rq))],201);
+});
+$app->put('/api/sources/{uid}',function(Request $rq,Response $rs,array $args) use($auth,$sourcesAdmin) {
+    $auth->requireSession(true);return jsonResponse($rs,['source'=>$sourcesAdmin->save(bodyData($rq),$args['uid'])]);
+});
+$app->delete('/api/sources/{uid}',function(Request $rq,Response $rs,array $args) use($auth,$sourcesAdmin) {
+    $auth->requireSession(true);$sourcesAdmin->delete($args['uid']);return jsonResponse($rs,['ok'=>true]);
+});
 $app->get('/api/sources',function(Request $rq,Response $rs) use($auth,$jobs) {
     $auth->requireSession();return jsonResponse($rs,['sources'=>$jobs->sources()]);
 });

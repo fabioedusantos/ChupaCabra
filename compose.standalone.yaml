@@ -1,0 +1,95 @@
+# Instalação portátil para quem clonou o GitHub. Não usa infraestrutura familiar.
+# Uso: docker compose -f compose.standalone.yaml up -d --build
+name: chupacabra
+services:
+  db:
+    image: mariadb:11.8
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${DB_NAME:-chupacabra}
+      MARIADB_USER: ${DB_USER:-chupacabra}
+      MARIADB_PASSWORD: ${DB_PASSWORD:?Configure DB_PASSWORD no .env}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?Configure DB_ROOT_PASSWORD no .env}
+      TZ: ${TZ:-America/Sao_Paulo}
+    volumes:
+      - ./backend/docker/production/data/db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Configure REDIS_PASSWORD no .env}
+    command: ["/bin/sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\" --save 60 1000"]
+    volumes:
+      - ./backend/docker/production/data/redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping 2>/dev/null | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+  migrate:
+    build: {context: ./backend, dockerfile: docker/production/Dockerfile}
+    restart: "no"
+    command: ["php", "/app/bin/migrate.php"]
+    environment: &backend_env
+      APP_ENV: ${APP_ENV:-production}
+      TZ: ${TZ:-America/Sao_Paulo}
+      COOKIE_SECURE: ${COOKIE_SECURE:-0}
+      SESSION_LIFETIME_DAYS: ${SESSION_LIFETIME_DAYS:-30}
+      SESSION_RENEW_ON_ACTIVITY: ${SESSION_RENEW_ON_ACTIVITY:-1}
+      AUTH_USERS_B64: ${AUTH_USERS_B64:-}
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-chupacabra}
+      DB_USER: ${DB_USER:-chupacabra}
+      DB_PASSWORD: ${DB_PASSWORD:?Configure DB_PASSWORD no .env}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Configure REDIS_PASSWORD no .env}
+      SCRAPE_HOSTS: ${SCRAPE_HOSTS:-www.confianca.com.br,tauste.com.br,www.tauste.com.br}
+      SCRAPE_MAX_PAGES: ${SCRAPE_MAX_PAGES:-200}
+    depends_on:
+      db: {condition: service_healthy}
+  api:
+    build: {context: ./backend, dockerfile: docker/production/Dockerfile}
+    restart: unless-stopped
+    environment: *backend_env
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+  worker:
+    build: {context: ./backend, dockerfile: docker/production/Dockerfile}
+    scale: 5
+    restart: unless-stopped
+    command: ["php", "/app/bin/worker.php"]
+    environment: *backend_env
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+  scheduler:
+    build: {context: ./backend, dockerfile: docker/production/Dockerfile}
+    restart: unless-stopped
+    command: ["php", "/app/bin/scheduler.php"]
+    environment: *backend_env
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+  web:
+    build: {context: ./web, dockerfile: docker/production/Dockerfile}
+    restart: unless-stopped
+    depends_on:
+      api: {condition: service_started}
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${LOCAL_PORT:-8080}:80"
+    command: ["caddy", "reverse-proxy", "--from", ":80", "--to", "web:80"]
+    depends_on: [web]

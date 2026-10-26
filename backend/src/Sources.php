@@ -17,20 +17,46 @@ final class Sources
         $rows=$this->db->query("SELECT s.alias,s.name,
              (SELECT COUNT(*) FROM url_search u WHERE u.supermercado=s.alias) AS sources_count,
              (SELECT COUNT(*) FROM url_search u WHERE u.supermercado=s.alias AND u.enabled=1) AS active_sources,
-             (SELECT COUNT(*) FROM saved i WHERE i.supermercado=s.alias) AS saved_items
+             (SELECT COUNT(*) FROM saved i WHERE i.supermercado=s.alias) AS saved_items,
+             (SELECT COUNT(*) FROM purchase_history_items h WHERE h.supermercado=s.alias) AS historic_items
              FROM supermercados s ORDER BY s.name")->fetchAll();
         foreach ($rows as &$row) {
             $market=(string)$row['alias'];
             // As tabelas de catálogos são implementadas por raspador, não derivadas de input.
             $row['has_products']=in_array($market,['confianca','tauste'],true)
                 ? (int)$this->db->query('SELECT EXISTS(SELECT 1 FROM data_'.$market.' LIMIT 1)')->fetchColumn() : 0;
-            $row['visible']=((int)$row['active_sources']>0 || (int)$row['has_products']>0 || (int)$row['saved_items']>0);
+            $row['visible']=((int)$row['active_sources']>0 || (int)$row['has_products']>0
+                || (int)$row['saved_items']>0 || (int)$row['historic_items']>0);
         }
         unset($row);
         return $rows;
     }
 
     public function save(array $data, ?string $uid=null): array
+    {
+        // Mesma trava usada pelo worker: não alterar URL/categoria no meio da raspagem.
+        $lockName=$uid===null?null:'chupacabra:source:'.sha1($uid);
+        if($lockName!==null) {
+            $st=$this->db->prepare('SELECT GET_LOCK(?,0)');
+            $st->execute([$lockName]);
+            if((int)$st->fetchColumn()!==1) throw new ApiException('Esta fonte está ocupada. Aguarde antes de editar.',409);
+        }
+        try {
+            $this->db->beginTransaction();
+            $result=$this->write($data,$uid);
+            $this->db->commit();
+            return $result;
+        } catch (\Throwable $e) {
+            if($this->db->inTransaction()) $this->db->rollBack();
+            throw $e;
+        } finally {
+            if($lockName!==null) {
+                $st=$this->db->prepare('SELECT RELEASE_LOCK(?)');$st->execute([$lockName]);
+            }
+        }
+    }
+
+    private function write(array $data, ?string $uid): array
     {
         $market=trim((string)($data['supermercado']??''));
         $category=trim((string)($data['categoria']??''));
@@ -46,12 +72,19 @@ final class Sources
         }
         // ScraperFactory valida supermercado implementado, host permitido e allowlist de .env.
         ScraperFactory::for($market,$url);
+        $changedConfiguration=false;
         if($uid!==null){
             $this->requireUid($uid);
-            $st=$this->db->prepare('SELECT supermercado FROM url_search WHERE uid=?');
-            $st->execute([$uid]);$original=$st->fetchColumn();
-            if($original===false)throw new ApiException('Fonte não encontrada.',404);
-            if($original!==$market)throw new ApiException('Para trocar de supermercado, crie uma nova fonte.');
+            $st=$this->db->prepare('SELECT supermercado,categoria,url,enabled FROM url_search WHERE uid=?');
+            $st->execute([$uid]);$original=$st->fetch(PDO::FETCH_ASSOC);
+            if(!$original)throw new ApiException('Fonte não encontrada.',404);
+            if($original['supermercado']!==$market)throw new ApiException('Para trocar de supermercado, crie uma nova fonte.');
+            $changedConfiguration=($original['categoria']!==$category || $original['url']!==$url);
+            if($changedConfiguration || !$enabled){
+                $running=$this->db->prepare("SELECT 1 FROM scrape_jobs WHERE source_uid=? AND status='running' LIMIT 1");
+                $running->execute([$uid]);
+                if($running->fetchColumn())throw new ApiException('Esta fonte está em execução. Aguarde a conclusão antes de alterar a URL, a categoria ou desativá-la.',409);
+            }
         }
         $dupe=$this->db->prepare('SELECT uid FROM url_search WHERE supermercado=? AND (LOWER(categoria)=LOWER(?) OR url=?) AND (? IS NULL OR uid<>?) LIMIT 1');
         $dupe->execute([$market,$category,$url,$uid,$uid]);
@@ -70,7 +103,7 @@ final class Sources
         }
         // Não apagar trabalhos em execução. Pendências de fontes desativadas deixam
         // de ser processadas e continuam auditáveis como substituídas.
-        if(!$enabled) $this->supersedeWaiting($uid);
+        if(!$enabled || $changedConfiguration) $this->supersedeWaiting($uid,$enabled);
         $st=$this->db->prepare('SELECT uid,supermercado,categoria,url,enabled FROM url_search WHERE uid=?');
         $st->execute([$uid]);return $st->fetch();
     }
@@ -86,11 +119,12 @@ final class Sources
         if(!$st->rowCount())throw new ApiException('Fonte não encontrada.',404);
     }
 
-    private function supersedeWaiting(string $uid): void
+    private function supersedeWaiting(string $uid,bool $enabled): void
     {
+        $message=$enabled?'URL ou categoria alterada no painel; solicitação anterior substituída':'Fonte desativada no painel';
         $st=$this->db->prepare("UPDATE scrape_jobs SET status='superseded',finished_at=NOW(),
-            error_message='Fonte desativada no painel' WHERE source_uid=? AND status IN ('pending','queued','retry')");
-        $st->execute([$uid]);
+            error_message=? WHERE source_uid=? AND status IN ('pending','queued','retry')");
+        $st->execute([$message,$uid]);
         // Os IDs no Redis permanecem inofensivos: Jobs::work ignora IDs não-queued.
     }
 

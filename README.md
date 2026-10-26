@@ -5,7 +5,7 @@
 
   **A lista da família. Preços de verdade. Menos trabalho na hora de comprar.**
 
-  Uma aplicação web/PWA para organizar compras compartilhadas, pesquisar preços e atualizar catálogos de supermercados com processos assíncronos — desenvolvida para uso doméstico, publicada para estudo e instalação independente.
+  Um projeto familiar nascido em 2018: pesquisar preços antes de sair, montar uma lista compartilhada e acompanhar o custo das compras — com scraping assíncrono, API e infraestrutura próprias. Código aberto à leitura; aplicação e dados da família privados.
 
   ![PHP](https://img.shields.io/badge/PHP-8.5.12-777BB4?logo=php&logoColor=white) ![Vue](https://img.shields.io/badge/Vue.js-3-42b883?logo=vuedotjs&logoColor=white) ![Slim](https://img.shields.io/badge/API-SlimPHP%204-363636) ![MariaDB](https://img.shields.io/badge/MariaDB-11.8-003545?logo=mariadb&logoColor=white) ![Redis](https://img.shields.io/badge/Redis-7.4-dc382d?logo=redis&logoColor=white) ![Docker](https://img.shields.io/badge/Docker-Compose-2496ed?logo=docker&logoColor=white)
 
@@ -15,15 +15,40 @@
 ---
 
 > [!IMPORTANT]
-> **Código público, aplicação privada.** Esta instância é utilizada por uma família, não é um serviço aberto a inscrições nem uma plataforma com contas compartilhadas entre desconhecidos. Para experimentar, faça seu próprio clone, configure seu ambiente e instale localmente. Nenhuma instalação pública ou credencial de demonstração é fornecida.
+> **Repositório público, aplicação familiar privada.** Esta instância é utilizada por uma família, não é um serviço aberto a inscrições nem uma plataforma com contas compartilhadas entre desconhecidos. Para experimentar, faça seu próprio clone, configure seu ambiente e instale localmente. Nenhuma instalação pública ou credencial de demonstração é fornecida.
 
-## 🎯 Por que existe
+## ❤️ A história: uma necessidade da vida real, desde 2018
 
-A maioria das listas de compras começa simples e termina fragmentada: produtos esquecidos, vários celulares com listas diferentes, preços antigos e pouca noção do custo até chegar ao caixa. O ChupaCabra reúne isso em um fluxo só: **planejar → pesquisar → comprar → fechar → analisar**.
+**Tudo começou quando me casei, em 2018.** A vida a dois trouxe uma tarefa tão comum quanto desafiadora: organizar as compras da casa sem perder tempo e dinheiro. Eu e minha esposa percebíamos que os preços nas prateleiras pareciam cada vez mais altos, mas visitar vários supermercados para comparar cada produto também tinha um custo. Gasolina, deslocamento e tempo poderiam consumir justamente a economia que procurávamos.
 
-O projeto nasceu em uma arquitetura PHP legada baseada em **CodeIgniter 3** e evoluiu para uma solução moderna, com frontend Vue 3, API SlimPHP 4 e raspagem assíncrona com Redis. O objetivo da renovação foi manter os comportamentos úteis da aplicação original sem transformar uma ferramenta familiar em um produto desnecessariamente complexo.
+A pergunta que deu origem ao ChupaCabra foi simples:
 
-**Escopo intencional:** lista única e compartilhada, autenticação de membros previamente autorizados, supermercados suportados por raspadores específicos. O repositório público não transforma a instalação da família em um serviço multiusuário de terceiros.
+> **E se eu soubesse o preço dos produtos antes de sair de casa — e entrasse no supermercado com a lista pronta, incluindo uma estimativa do total?**
+
+Como desenvolvedor, resolvi criar a ferramenta para nós mesmos. As primeiras versões eram rudimentares, mas cumpriam sua missão: pesquisar preços disponíveis online, organizar os itens e evitar a sensação de chegar ao caixa sem ideia do gasto. A proposta nunca foi substituir a experiência da compra ou prometer o menor preço absoluto; era oferecer **informação suficiente para tomar decisões melhores**, considerando também a distância e o custo do deslocamento.
+
+Logo apareceu um benefício que eu nem havia previsto tão claramente: a **lista compartilhada em tempo real**. No próprio supermercado, eu e minha esposa abríamos a mesma página, cada um no seu celular, marcando os produtos conforme os colocávamos no carrinho. Deixávamos de repetir corredores, ganhávamos tempo e tínhamos uma referência de quanto ainda faltava comprar. O resultado prático foi uma rotina mais simples e uma economia que fazia diferença para nós — sem precisar transformar o projeto em um serviço comercial.
+
+### 🏡 Uma infraestrutura pequena, mas nossa
+
+Para manter a ferramenta acessível à família sem contratar uma infraestrutura desnecessária, adquiri uma **Orange Pi 3** e passei a hospedar a aplicação em casa. Com o tempo, adotei o **Cloudflare Tunnel (cloudflared)** para acessar o ambiente pela internet sem abrir indiscriminadamente portas de entrada na rede doméstica. A aplicação permaneceu **fechada para a família**: autenticação própria, contas previamente definidas e nenhuma proposta de cadastro público.
+
+A solução amadureceu enquanto nossa rotina continuava. A versão mais recente representa uma renovação significativa: Vue 3 no frontend, API SlimPHP com PHP 8.5, MariaDB, Redis, workers assíncronos e Docker. A mudança tecnológica não altera a ideia original. **O ChupaCabra continua sendo a ferramenta que construí para fazer as compras de casa funcionarem melhor.**
+
+**Por que o código está no GitHub?** Porque uma solução pequena e pessoal também pode ensinar muito sobre arquitetura, automação, concorrência, segurança, operação e manutenção. O repositório é público para estudo e instalação independente; **nossa instância familiar, nossos dados e nossas contas não são públicos**.
+
+### 🗓️ Marcos da evolução
+
+| Período | Evolução |
+| --- | --- |
+| **2018** | Ideia e primeiras versões para comparar preços, planejar e compartilhar a lista em família |
+| **Fase original** | Aplicação PHP/CodeIgniter 3 e raspadores específicos para os supermercados atendidos |
+| **Hospedagem doméstica** | Orange Pi 3, acesso remoto controlado e Cloudflare Tunnel, mantendo a ferramenta privada |
+| **Outubro de 2026** | Renovação para Vue 3, SlimPHP, PHP 8.5, filas Redis, workers, observações, relatórios e painel de importações |
+| **Agora** | Código preparado para ser consultado e instalado por outras pessoas, sem disponibilizar a instância da família |
+
+> A tabela apresenta **marcos do produto**, não datas exatas de commits recuperados. O histórico Git do legado não estava no arquivo-fonte mais recente; veja [a seção de histórico](#-evolução-e-limites-conhecidos).
+
 
 ## ✨ O que o ChupaCabra entrega
 
@@ -38,7 +63,7 @@ O projeto nasceu em uma arquitetura PHP legada baseada em **CodeIgniter 3** e ev
 | **Automação** | Agendamento diário às 9h, workers em paralelo, retries, heartbeat, deduplicação, recuperação de falhas |
 | **PWA responsivo** | Instalação no celular a partir de um navegador compatível, sem manter um app nativo separado |
 
-As URLs configuradas no banco não são “plugins” arbitrários: **cada supermercado precisa de um raspador próprio no backend**. Esta versão implementa **Confiança** e **Tauste**. Uma loja sem fonte ativa, produtos importados ou itens presentes na lista não aparece nos filtros de compra; permanece gerenciável em **Importações**.
+As URLs configuradas no banco não são “plugins” arbitrários: **cada supermercado precisa de um raspador próprio no backend**. Esta versão implementa **Confiança** e **Tauste**. Uma loja sem fonte ativa, produtos importados ou itens utilizados na lista/histórico não aparece nos filtros de compra; permanece gerenciável em **Importações**.
 
 ## 🚀 Instalação rápida para quem clonou o GitHub
 
@@ -56,7 +81,7 @@ Não precisa instalar PHP, Node, Composer, MariaDB ou Redis no computador: tudo 
 ### 2. Clone e configure o ambiente
 
 ```bash
-# Após criar/clonar o repositório na sua conta GitHub:
+# Depois que você criar/publicar seu próprio repositório:
 git clone https://github.com/SEU_USUARIO/SEU_REPOSITORIO.git chupacabra
 cd chupacabra
 cp .env.example .env
@@ -124,7 +149,7 @@ O antigo cadastro manual em `url_search` foi levado para a central web, sem elim
 4. **Excluir:** só é possível excluir uma fonte que nunca produziu histórico de tarefas. Fontes com histórico devem ser desativadas para manter rastreabilidade.
 5. **Executar:** dispare uma fonte, um supermercado ou todas as fontes habilitadas. A rotina diária continua independente da ação manual.
 
-A alteração de URL afeta as próximas execuções: **não reescreve produtos já extraídos**. Fontes inválidas, domínios fora da allowlist e supermercados sem scraper retornam erro explícito.
+A alteração de URL ou categoria invalida pendências da configuração anterior. Edições são bloqueadas enquanto a mesma fonte estiver em execução, evitando categorias e endereços trocados durante uma raspagem. Para aplicar a alteração imediatamente, execute novamente a fonte. A alteração **não reescreve produtos já extraídos**. Fontes inválidas, domínios fora da allowlist e supermercados sem scraper retornam erro explícito.
 
 ### Estados e desempenho
 
@@ -210,7 +235,7 @@ docker compose -f compose.standalone.yaml up -d --build
 docker compose -f compose.standalone.yaml run --rm migrate
 ```
 
-Se você usa o Compose original com Cloudflare/LAN, **não substitua suas configurações por valores públicos de exemplo**: mantenha seu `.env`, redes externas, certificados e dados. A migração histórica dos caminhos de armazenamento é detalhada em [docs/ATUALIZACAO-ESTRUTURA.md](docs/ATUALIZACAO-ESTRUTURA.md).
+Se você usa o Compose original com Cloudflare/LAN, **não substitua suas configurações por valores públicos de exemplo**: mantenha seu `.env`, redes externas, certificados e dados. Nesse ambiente, `CADDY_LAN_IP` e `CADDY_LAN_MAC` são obrigatórios no `.env` privado, porque o código público não contém os endereços reais da rede da família; defina-os antes de recriar o contêiner Caddy. A migração histórica dos caminhos de armazenamento é detalhada em [docs/ATUALIZACAO-ESTRUTURA.md](docs/ATUALIZACAO-ESTRUTURA.md).
 
 ## 🧪 Diagnóstico e testes
 
@@ -223,13 +248,15 @@ Há testes de regras financeiras em `backend/tests/PurchaseHistoryTest.php` e ve
 | Nenhum produto encontrado | Fontes cadastradas e ativas? Importação já terminou com `success`? |
 | URL rejeitada | Domínio aceito pelo scraper e incluído em `SCRAPE_HOSTS`; usar HTTPS |
 | Fonte não executa | Verificar `enabled`, fila pausada, estado do job e logs de `scheduler`/`worker` |
+| Mudou categoria ou URL durante uma importação | Aguarde a execução atual; edições são recusadas enquanto o worker utiliza a fonte |
+| Mercado não aparece na lista | Ele é ocultado quando não há fonte ativa, produtos importados ou itens utilizados; continua configurável no painel |
 | Dados desapareceram após reinstalar | Conferir caminho de persistência; **não** inicializar um banco vazio por engano |
 | PWA não instala | HTTPS válido fora de localhost, navegador compatível e manifesto carregado |
 | Alterou frontend e não mudou | Recriar imagem web e recarregar app; verificar cache de service worker |
 
 ## 🧭 Evolução e limites conhecidos
 
-O histórico real anterior à modernização não acompanha este ZIP: a pasta `.git` original recebida estava sem commits. A história **arquitetural** do legado está documentada aqui, mas não foi fabricada uma linha do tempo de commits de 2025 a partir do código de 2026. Novos commits refletem arquivos realmente disponíveis nesta reconstrução.
+**Transparência sobre o Git.** O `.git` presente no arquivo-fonte recebido não trazia commits. A versão legada é mencionada e contextualizada historicamente, mas os arquivos originais dessa fase não estavam disponíveis para reconstruir commits autênticos de dezembro de 2025. O histórico incluído nesta entrega foi **reconstruído em outubro de 2026** a partir do código-fonte fornecido: seus commits organizam mudanças efetivamente presentes nos arquivos e **não equivalem a um registro contemporâneo do trabalho realizado em 2018 ou 2025**. Não atribuí commits inventados ao legado.
 
 O foco continua sendo robustez, simplicidade e utilidade para a família; inclusão de novos supermercados exige implementar/testar seus parsers, domínios permitidos e possíveis mudanças de layout nas páginas de terceiros.
 

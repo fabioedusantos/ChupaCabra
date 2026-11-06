@@ -157,9 +157,6 @@ body{background:var(--paper);color:var(--ink)}
   .page-edit .item-fields{grid-template-columns:80px minmax(0,1fr)}
   .page-edit .editor-save-dock .button{min-width:116px}
 }
-/* Troca rápida também durante a conferência da compra. */
-.shopping-swap{display:inline-flex;align-items:center;min-height:38px;margin-top:6px;padding:6px 9px;border:1px solid #dce5f8;border-radius:9px;background:#f6f8fe;color:#2444a4;font-size:.72rem;font-weight:800}
-.shopping-swap:hover,.shopping-swap:focus-visible{background:#e8efff}
 .page-edit .undo-replace{background:#fff;border-color:#bdcbed;color:#3156a6}
 @media(max-width:650px){.page-edit .edit-item-actions{flex-wrap:wrap}.page-edit .edit-item-actions .button{min-height:42px}}
 

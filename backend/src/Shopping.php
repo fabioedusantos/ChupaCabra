@@ -114,6 +114,102 @@ final class Shopping
         return $this->saved();
     }
 
+    /**
+     * Persiste apenas os itens modificados na montagem da lista. Diferente de
+     * replace(), alterações de outros familiares não são removidas pelo envio.
+     * Os IDs temporários negativos permitem relacionar inclusões à tela.
+     */
+    public function applyChanges(array $input): array
+    {
+        $adds=$input['add']??[];
+        $updates=$input['update']??[];
+        $removes=$input['remove']??[];
+        if (!is_array($adds) || !array_is_list($adds) || !is_array($updates) || !array_is_list($updates)
+            || !is_array($removes) || !array_is_list($removes)
+            || count($adds)+count($updates)+count($removes)>500) {
+            throw new ApiException('Alterações da lista inválidas.');
+        }
+        $created=[];
+        $this->db->beginTransaction();
+        try {
+            // Trava o conjunto atual para verificar exclusões e limite da lista.
+            $existing=array_fill_keys(array_map('intval',$this->db->query('SELECT id FROM saved FOR UPDATE')->fetchAll(PDO::FETCH_COLUMN)),true);
+            $seen=[];
+            foreach ($removes as $id) {
+                if (!is_int($id) || $id<=0 || isset($seen[$id]) || !isset($existing[$id])) {
+                    throw new ApiException('A lista foi modificada em outro dispositivo. Atualize a página.',409);
+                }
+                $seen[$id]=true;
+            }
+            foreach ($updates as $row) {
+                $id=is_array($row)?($row['id']??null):null;
+                if (!is_int($id) || $id<=0 || isset($seen[$id]) || !isset($existing[$id])) {
+                    throw new ApiException('O produto foi removido em outro dispositivo. Atualize a página.',409);
+                }
+                $seen[$id]=true;
+            }
+            if (count($existing)-count($removes)+count($adds)>500) {
+                throw new ApiException('Limite de 500 itens por lista.');
+            }
+            $tempIds=[];
+            foreach ($adds as $row) {
+                $clientId=is_array($row)?($row['clientId']??null):null;
+                if (!is_int($clientId) || $clientId>=0 || isset($tempIds[$clientId])) {
+                    throw new ApiException('Identificador temporário inválido.');
+                }
+                $tempIds[$clientId]=true;
+            }
+            foreach ($removes as $id) {
+                $this->db->prepare('DELETE FROM saved WHERE id=?')->execute([$id]);
+            }
+            foreach ($updates as $row) {
+                [$title,$category,$qty,$price,$market,$note,$image]=$this->checkedItem($row);
+                $replaceImage=($row['imageReplaced']??false)===true;
+                $this->db->prepare("UPDATE saved SET titulo=?, categoria=?, qtd=?, preco=?, supermercado=?, observacao=?, imgUrl=CASE WHEN ?=1 THEN ? ELSE imgUrl END WHERE id=?")
+                    ->execute([$title,$category,$qty,$price,$market,$note,$replaceImage?1:0,$image,$row['id']]);
+            }
+            foreach ($adds as $row) {
+                [$title,$category,$qty,$price,$market,$note,$image]=$this->checkedItem($row);
+                // Evita duplicações em retries após perda de conexão e entre
+                // familiares que adicionem o mesmo produto ao mesmo tempo.
+                $duplicate=$this->db->prepare('SELECT id FROM saved WHERE supermercado=? AND titulo=? LIMIT 1');
+                $duplicate->execute([$market,$title]);
+                if ($duplicate->fetchColumn()!==false) {
+                    throw new ApiException('Este produto já está na lista compartilhada. Atualize a página.',409);
+                }
+                $this->db->prepare('INSERT INTO saved (titulo,categoria,qtd,preco,supermercado,observacao,imgUrl) VALUES (?,?,?,?,?,?,?)')
+                    ->execute([$title,$category,$qty,$price,$market,$note,$image]);
+                $created[(string)$row['clientId']]=(int)$this->db->lastInsertId();
+            }
+            $this->db->commit();
+        } catch (\Throwable $e) {
+            $this->db->rollBack();
+            throw $e;
+        }
+        return ['items'=>$this->saved(),'created'=>$created];
+    }
+
+    private function checkedItem(array $row): array
+    {
+        $title=trim((string)($row['titulo']??''));
+        $category=trim((string)($row['categoria']??''));
+        $market=(string)($row['supermercado']??'');
+        $qty=(float)($row['qtd']??0);
+        $price=(float)($row['preco']??0);
+        $note=trim((string)($row['observacao']??''));
+        $image=trim((string)($row['imgUrl']??''));
+        if ($image!=='' && (strlen($image)>2048 || !filter_var($image,FILTER_VALIDATE_URL)
+            || !in_array(strtolower((string)parse_url($image,PHP_URL_SCHEME)),['http','https'],true))) {
+            throw new ApiException('URL da imagem inválida.');
+        }
+        if ($title==='' || mb_strlen($title)>254 || mb_strlen($category)>100 || mb_strlen($note)>500
+            || !in_array($market,['confianca','tauste'],true) || !is_finite($qty) || $qty<=0 || $qty>100000
+            || !is_finite($price) || $price<0 || $price>999999) {
+            throw new ApiException('Revise os campos, quantidades e observações da lista.');
+        }
+        return [$title,$category,$qty,$price,$market,$note,$image];
+    }
+
     public function purchase(int $id, bool $bought): void
     {
         $st=$this->db->prepare('UPDATE saved SET oculto=? WHERE id=?'); $st->execute([$bought?1:0,$id]);

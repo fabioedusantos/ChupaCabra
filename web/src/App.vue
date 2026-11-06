@@ -6,6 +6,7 @@ const validPage = () => Object.keys(routes).find(k=>routes[k]===location.pathnam
 const page=ref(validPage()),session=ref(null),ready=ref(false)
 const username=ref(''),password=ref(''),authLoading=ref(false),busy=ref(false),error=ref(''),notice=ref('')
 const items=ref([]),editItems=ref([]),products=ref([]),searchText=ref(''),searchBusy=ref(false)
+const editorSaving=ref(false),editorStatus=ref('saved'),editorError=ref('')
 const listFilter=ref(''),statusFilter=ref('pending'),marketFilter=ref('all')
 const statusOptions=[{value:'pending',label:'Pendentes'},{value:'bought',label:'Comprados'},{value:'all',label:'Todos'}]
 const replacingId=ref(null),searchInput=ref(null),sources=ref([]),jobs=ref([]),attempts=ref([]),selectedMarket=ref('all')
@@ -22,6 +23,7 @@ const reportMonthLabel=value=>new Date(value+'-01T12:00:00').toLocaleDateString(
 const detailMarkets=computed(()=>{const groups=[];for(const item of purchaseDetail.value?.items||[]){let g=groups.find(x=>x.market===item.supermercado);if(!g){g={market:item.supermercado,items:[]};groups.push(g)}g.items.push(item)}return groups})
 const differenceLabel=value=>Number(value)>0?'Economia frente ao estimado':Number(value)<0?'Acima do estimado':'Dentro do estimado'
 let tempId=-1,searchTimer,toastTimer,pollTimer,tickTimer,requestNumber=0
+let editorSaveTimer=null,editorSavePromise=null,editorBaseline=new Map()
 const markets={confianca:'Confiança',tauste:'Tauste'}
 // A administração lista todos os raspadores; compras só mostram lojas úteis.
 const availableMarkets=computed(()=>Object.entries(markets).filter(([id])=>
@@ -56,7 +58,7 @@ function directImage(url, market='confianca') {
 function proxyImage(item) {
   if (!item || !Object.hasOwn(markets,item.supermercado)) return ''
   const id=Number(item.id)
-  if (Number.isSafeInteger(id) && id>0) return '/api/images/saved/'+id
+  if (Number.isSafeInteger(id) && id>0) return '/api/images/saved/'+id+(item._imageRevision||item.dataHora?'?v='+encodeURIComponent(item._imageRevision||item.dataHora):'')
   const imageId=Number(item.image_id)
   if (Number.isSafeInteger(imageId) && imageId>0) return '/api/images/catalog/'+item.supermercado+'/'+imageId
   return ''
@@ -87,12 +89,172 @@ function previewItem(item,event) {
 }
 function flash(msg,isError=false){notice.value=isError?'':msg;error.value=isError?msg:'';clearTimeout(toastTimer);toastTimer=setTimeout(()=>{notice.value='';error.value=''},4800)}
 async function api(path,method='GET',payload=null){const headers={Accept:'application/json'};if(payload!==null)headers['Content-Type']='application/json';if(session.value?.csrf&&method!=='GET')headers['X-CSRF-Token']=session.value.csrf;let response;try{response=await fetch('/api'+path,{method,credentials:'same-origin',headers,body:payload===null?undefined:JSON.stringify(payload)})}catch{throw new Error('Não foi possível conectar ao servidor.')}const data=await response.json().catch(()=>({}));if(!response.ok){if(response.status===401&&path!=='/auth/login')session.value=null;throw new Error(data.error||'Falha ao concluir operação.')}return data}
+// A montagem é persistida por diferenças. O PUT legado substituía a lista
+// inteira: um autosave baseado nele poderia excluir inclusões de outro familiar.
+const editorFields=x=>({
+  titulo:x.titulo,categoria:x.categoria,qtd:Number(x.qtd),preco:Number(x.preco),
+  supermercado:x.supermercado,imgUrl:directImage(x.imgUrl,x.supermercado),
+  observacao:x.observacao||''
+})
+const editorSignature=x=>JSON.stringify(editorFields(x))
+const editorStatusText=computed(()=>editorStatus.value==='saving'?'Salvando alterações...':
+  editorStatus.value==='pending'?'Alterações pendentes de salvamento':
+  editorStatus.value==='error'?(editorError.value||'Não foi possível salvar. Tente novamente.'):
+  '✓ Salvo automaticamente')
+function resetEditor(){
+  clearTimeout(editorSaveTimer)
+  editorBaseline=new Map(items.value.map(x=>[Number(x.id),editorSignature(x)]))
+  editItems.value=items.value.map(x=>({...x}))
+  replacingId.value=null
+  editorError.value=''
+  editorStatus.value='saved'
+}
+function pendingEditorChanges(){
+  const currentIds=new Set(editItems.value.map(x=>Number(x.id)).filter(id=>id>0))
+  const add=[],update=[],remove=[]
+  for(const item of editItems.value){
+    const id=Number(item.id),fields=editorFields(item)
+    if(id<=0)add.push({clientId:id,...fields})
+    else if(editorBaseline.get(id)!==editorSignature(item))update.push({id,...fields,imageReplaced:!!item._replacedLocally})
+  }
+  for(const id of editorBaseline.keys())if(!currentIds.has(id))remove.push(id)
+  return {add,update,remove}
+}
+const hasEditorChanges=()=>{
+  const c=pendingEditorChanges()
+  return !!(c.add.length||c.update.length||c.remove.length)
+}
+function scheduleEditorSave(delay=650){
+  clearTimeout(editorSaveTimer)
+  if(page.value!=='edit'||!session.value)return
+  if(!hasEditorChanges()){
+    if(!editorSaving.value){editorStatus.value='saved';editorError.value=''}
+    return
+  }
+  editorStatus.value=editorSaving.value?'saving':'pending'
+  editorSaveTimer=setTimeout(()=>{editorSaveTimer=null;void flushEditor()},delay)
+}
+watch(editItems,()=>{
+  if(page.value==='edit'){
+    editorError.value=''
+    scheduleEditorSave()
+  }
+},{deep:true})
+
+async function flushEditor(){
+  clearTimeout(editorSaveTimer)
+  editorSaveTimer=null
+  if(editorSavePromise){
+    if(!(await editorSavePromise))return false
+    return flushEditor()
+  }
+  if(!session.value)return false
+  const changes=pendingEditorChanges()
+  if(!changes.add.length&&!changes.update.length&&!changes.remove.length){
+    editorStatus.value='saved'
+    editorError.value=''
+    return true
+  }
+  if([...changes.add,...changes.update].some(x=>!Number.isFinite(x.qtd)||x.qtd<=0||x.qtd>100000||!Number.isFinite(x.preco))){
+    editorError.value='Confira as quantidades: use valores maiores que zero.'
+    editorStatus.value='error'
+    return false
+  }
+  // Snapshot das alterações enviadas: o usuário pode continuar digitando
+  // durante o fetch sem perder as mudanças mais recentes.
+  const submitted=[...changes.add.map(x=>({...x})),...changes.update.map(x=>({...x}))]
+  const snapshots=new Map(submitted.map(x=>[x.id??x.clientId,editorSignature(x)]))
+  const knownIds=new Set(editorBaseline.keys())
+  editorSaving.value=true
+  editorStatus.value='saving'
+  const request=(async()=>{
+    try{
+      const result=await api('/shopping','PATCH',changes)
+      const created=result.created||{}
+      for(const id of changes.remove)editorBaseline.delete(id)
+      for(const row of changes.update)editorBaseline.set(row.id,snapshots.get(row.id))
+      for(const row of changes.add){
+        const id=Number(created[String(row.clientId)])
+        if(!Number.isSafeInteger(id)||id<=0)throw new Error('Não foi possível confirmar um produto salvo. Atualize a lista.')
+        const local=editItems.value.find(x=>Number(x.id)===row.clientId)
+        if(local)local.id=id
+        editorBaseline.set(id,snapshots.get(row.clientId))
+      }
+      items.value=result.items||[]
+      const createdIds=new Set(Object.values(created).map(Number))
+      for(const serverItem of items.value){
+        const id=Number(serverItem.id)
+        const local=editItems.value.find(x=>Number(x.id)===id)
+        if(local){
+          local.oculto=serverItem.oculto
+          local.dataHora=serverItem.dataHora
+          // Quando a substituição já chegou ao banco, a foto deve usar o ID
+          // persistido e o marcador de substituição deixa de ser exibido.
+          const submittedSignature=snapshots.get(id)??Object.keys(created).reduce((v,k)=>v??(Number(created[k])===id?snapshots.get(Number(k)):undefined),undefined)
+          if(submittedSignature&&editorSignature(local)===submittedSignature){
+            if(changes.update.some(x=>x.id===id&&x.imageReplaced))local._imageRevision=Date.now()
+            delete local._replacedLocally
+            delete local._originalProduct
+          }
+        }else if(!knownIds.has(id)&&!createdIds.has(id)){
+          // Uma inclusão feita por outro membro da família não deve sumir.
+          editorBaseline.set(id,editorSignature(serverItem))
+          editItems.value.push({...serverItem})
+        }
+      }
+      editorError.value=''
+      return true
+    }catch(e){
+      editorError.value=e.message||'Não foi possível salvar a lista.'
+      editorStatus.value='error'
+      flash(editorError.value,true)
+      return false
+    }finally{
+      editorSaving.value=false
+    }
+  })()
+  editorSavePromise=request
+  const succeeded=await request
+  if(editorSavePromise===request)editorSavePromise=null
+  if(!succeeded)return false
+  // Se a lista mudou enquanto a requisição estava em andamento, envia somente
+  // o novo delta, em ordem, sem perder quantidades/observações digitadas.
+  return flushEditor()
+}
+function warnUnsaved(e){
+  if(session.value&&(editorSaving.value||hasEditorChanges())){
+    e.preventDefault()
+    e.returnValue=''
+  }
+}
+function retryWhenOnline(){if(page.value==='edit'&&hasEditorChanges())scheduleEditorSave(0)}
+
 async function loadMarketInfo(){const r=await api('/markets');marketInfo.value=r.markets||[];if(marketFilter.value!=='all'&&!availableMarkets.value.some(([id])=>id===marketFilter.value))marketFilter.value='all'}
-async function init(){ready.value=false;try{const r=await api('/auth/session');session.value=r.authenticated?r:null;if(session.value){await loadShopping();await loadMarketInfo();if(page.value==='edit')editItems.value=items.value.map(x=>({...x}))}}catch(e){flash(e.message,true)}finally{ready.value=true}}
-async function login(){authLoading.value=true;try{const s=await api('/auth/login','POST',{username:username.value,password:password.value});session.value={authenticated:true,...s};password.value='';await loadShopping();await loadMarketInfo();if(page.value==='edit')editItems.value=items.value.map(x=>({...x}));await showPage(validPage(),false)}catch(e){flash(e.message,true)}finally{authLoading.value=false}}
-async function logout(){try{await api('/auth/logout','POST',{})}catch{}session.value=null;items.value=[];report.value=null;closing.value=false;page.value='list';history.replaceState({},'','/compras')}
+async function init(){ready.value=false;try{const r=await api('/auth/session');session.value=r.authenticated?r:null;if(session.value){await loadShopping();await loadMarketInfo();if(page.value==='edit')resetEditor()}}catch(e){flash(e.message,true)}finally{ready.value=true}}
+async function login(){authLoading.value=true;try{const s=await api('/auth/login','POST',{username:username.value,password:password.value});session.value={authenticated:true,...s};password.value='';await loadShopping();await loadMarketInfo();if(page.value==='edit')resetEditor();await showPage(validPage(),false)}catch(e){flash(e.message,true)}finally{authLoading.value=false}}
+async function logout(){if(page.value==='edit'&&!(await flushEditor()))return;try{await api('/auth/logout','POST',{})}catch{}session.value=null;items.value=[];report.value=null;closing.value=false;page.value='list';history.replaceState({},'','/compras')}
 async function loadShopping(){const r=await api('/shopping');items.value=r.items||[]}
-async function showPage(id,push=true){if(!routes[id])return;const previous=page.value;page.value=id;error.value='';if(push&&location.pathname!==routes[id])history.pushState({},'',routes[id]);if(id==='edit'&&previous!=='edit'){editItems.value=items.value.map(x=>({...x}));searchText.value='';products.value=[];replacingId.value=null}if(id==='jobs')await loadJobs();if(id==='reports')await loadReports();window.scrollTo({top:0,behavior:'instant'})}
+async function showPage(id,push=true){
+  if(!routes[id])return false
+  const previous=page.value
+  if(previous==='edit'&&id!=='edit'&&session.value&&!(await flushEditor())){
+    flash(editorError.value||'Revise os itens antes de sair.',true)
+    if(!push)history.replaceState({},'',routes.edit)
+    return false
+  }
+  page.value=id
+  error.value=''
+  if(push&&location.pathname!==routes[id])history.pushState({},'',routes[id])
+  if(id==='edit'&&previous!=='edit'){
+    resetEditor()
+    searchText.value=''
+    products.value=[]
+  }
+  if(id==='jobs')await loadJobs()
+  if(id==='reports')await loadReports()
+  window.scrollTo({top:0,behavior:'instant'})
+  return true
+}
 function popState(){showPage(validPage(),false)}
 async function search(){const text=searchText.value.trim();if(text.length<2){requestNumber++;products.value=[];searchBusy.value=false;return}const req=++requestNumber;searchBusy.value=true;try{const r=await api('/search?q='+encodeURIComponent(text));if(req===requestNumber)products.value=r.products||[]}catch(e){if(req===requestNumber)flash(e.message,true)}finally{if(req===requestNumber)searchBusy.value=false}}
 watch(searchText,()=>{clearTimeout(searchTimer);searchTimer=setTimeout(search,320)})
@@ -112,8 +274,13 @@ async function replaceFromShopping(item) {
 }
 function undoReplace(item) {
   if (!item._originalProduct) return
+  // Se a substituição já foi enviada (ou está em trânsito), desfazê-la também
+  // precisa restaurar a foto antiga no banco, não só a descrição na tela.
+  const original={...item,...item._originalProduct}
+  const restoreImage=editorSaving.value||editorBaseline.get(Number(item.id))!==editorSignature(original)
   Object.assign(item,item._originalProduct)
-  delete item._replacedLocally
+  if(restoreImage)item._replacedLocally=true
+  else delete item._replacedLocally
   delete item._originalProduct
   flash('Substituição desfeita. O produto original foi restaurado.')
 }
@@ -140,7 +307,7 @@ function chooseProduct(p) {
       image_id:p.image_id||null,_replacedLocally:true
     })
     replacingId.value=null
-    flash('Produto substituído. Quantidade, observação e situação mantidas. Salve a lista para confirmar.')
+    flash('Produto substituído. Salvamento automático em andamento.')
     searchText.value=''
     products.value=[]
     nextTick(()=>document.getElementById('selected-'+selected.id)?.scrollIntoView({behavior:'smooth',block:'center'}))
@@ -149,14 +316,15 @@ function chooseProduct(p) {
   editItems.value.push({id:tempId--,titulo:p.titulo,categoria:p.categoria||'Sem categoria',qtd:1,preco:Number(p.preco),preco_atual:Number(p.preco),imgUrl:directImage(p.imgUrl,p.supermercado),image_id:p.image_id||null,supermercado:p.supermercado,oculto:0,observacao:''})
   searchText.value=''
   products.value=[]
-  flash('Produto adicionado à lista. Continue pesquisando ou salve as alterações.')
-  nextTick(()=>searchInput.value?.focus())
+  flash('Produto adicionado. A lista será salva automaticamente.')
+  nextTick(()=>{searchInput.value?.focus();scheduleEditorSave(0)})
 }
 function removeEditItem(item) {
   if (replacingId.value===item.id) cancelReplace()
   editItems.value=editItems.value.filter(x=>x.id!==item.id)
+  nextTick(()=>scheduleEditorSave(0))
 }
-async function save(){if(busy.value)return;busy.value=true;try{const r=await api('/shopping','PUT',{items:editItems.value.map(x=>({id:Number(x.id)>0?Number(x.id):0,titulo:x.titulo,categoria:x.categoria,qtd:Number(x.qtd),preco:Number(x.preco),supermercado:x.supermercado,imgUrl:directImage(x.imgUrl,x.supermercado),imageReplaced:!!x._replacedLocally,observacao:x.observacao||''}))});items.value=r.items||[];flash('Lista compartilhada atualizada.');await showPage('list')}catch(e){flash(e.message,true)}finally{busy.value=false}}
+async function save(){if(busy.value)return;if(await flushEditor()){flash('Lista compartilhada atualizada.');await showPage('list')}}
 async function toggle(item){if(busy.value)return;busy.value=true;const next=!Number(item.oculto);let promptClose=false;try{await api('/shopping/'+item.id+'/purchase','PATCH',{bought:next});item.oculto=next?1:0;promptClose=next&&items.value.length&&items.value.every(x=>Number(x.oculto))}catch(e){flash(e.message,true)}finally{busy.value=false;if(promptClose)openClosing()}}
 function openClosing(){if(busy.value||!items.value.length||pending.value!==0)return;receiptTotal.value='';purchaseNote.value='';closing.value=true;nextTick(()=>receiptInput.value?.focus())}
 function closeClosing(){if(!busy.value)closing.value=false}
@@ -303,8 +471,8 @@ const batchTime=b=>b?duration(elapsed(b.started,b.finished)): '—'
 const batchEta=b=>{if(!b||!b.active||!b.completed||!b.started)return '—';const seconds=elapsed(b.started,null);return seconds==null?'—':duration(Math.ceil(seconds/b.completed*(b.total-b.completed)))}
 const attemptsFor=id=>attempts.value.filter(a=>Number(a.job_id)===Number(id))
 const completedNote=a=>a.status==='success'?'Concluída':'Falha'
-onMounted(async()=>{window.addEventListener('popstate',popState);window.addEventListener('keydown',onKeydown);if(location.pathname==='/'||!Object.values(routes).includes(location.pathname))history.replaceState({},'',routes[page.value]);tickTimer=setInterval(()=>clock.value=Date.now(),1000);pollTimer=setInterval(()=>{if(session.value&&page.value==='jobs')loadJobs()},10000);await init();if(session.value&&page.value==='jobs')loadJobs();if(session.value&&page.value==='reports')loadReports()})
-onUnmounted(()=>{window.removeEventListener('popstate',popState);window.removeEventListener('keydown',onKeydown);clearInterval(pollTimer);clearInterval(tickTimer);clearTimeout(searchTimer);clearTimeout(toastTimer)})
+onMounted(async()=>{window.addEventListener('popstate',popState);window.addEventListener('keydown',onKeydown);window.addEventListener('beforeunload',warnUnsaved);window.addEventListener('online',retryWhenOnline);if(location.pathname==='/'||!Object.values(routes).includes(location.pathname))history.replaceState({},'',routes[page.value]);tickTimer=setInterval(()=>clock.value=Date.now(),1000);pollTimer=setInterval(()=>{if(session.value&&page.value==='jobs')loadJobs()},10000);await init();if(session.value&&page.value==='jobs')loadJobs();if(session.value&&page.value==='reports')loadReports()})
+onUnmounted(()=>{window.removeEventListener('popstate',popState);window.removeEventListener('keydown',onKeydown);window.removeEventListener('beforeunload',warnUnsaved);window.removeEventListener('online',retryWhenOnline);clearTimeout(editorSaveTimer);clearInterval(pollTimer);clearInterval(tickTimer);clearTimeout(searchTimer);clearTimeout(toastTimer)})
 </script>
 
 <template>
@@ -383,7 +551,7 @@ onUnmounted(()=>{window.removeEventListener('popstate',popState);window.removeEv
                   <button type="button" class="thumb" :disabled="!itemImage(item)" @click="previewItem(item,$event)" :aria-label="'Ampliar foto de '+item.titulo"><span class="thumb-placeholder" aria-hidden="true">◈</span><img v-if="itemImage(item)" :src="itemImage(item)" loading="lazy" :alt="'Foto de '+item.titulo" @error="imageError($event,item)"/></button>
                   <div class="edit-item-content">
                     <div class="edit-item-head">
-                      <div><strong>{{item.titulo}}</strong><span class="selected-category">{{item.categoria||'Sem categoria'}}</span><small>{{markets[item.supermercado]||item.supermercado}} · {{money(item.preco_atual??item.preco)}} <span v-if="Number(item.oculto)" class="selected-bought">· Comprado</span> <span v-if="item._replacedLocally" class="replacement-pending">· Substituição não salva</span></small></div>
+                      <div><strong>{{item.titulo}}</strong><span class="selected-category">{{item.categoria||'Sem categoria'}}</span><small>{{markets[item.supermercado]||item.supermercado}} · {{money(item.preco_atual??item.preco)}} <span v-if="Number(item.oculto)" class="selected-bought">· Comprado</span> <span v-if="item._replacedLocally" class="replacement-pending">· Substituição sendo salva</span></small></div>
                       <div class="edit-item-actions"><button v-if="item._replacedLocally" type="button" class="button outline small undo-replace" :disabled="busy" @click="undoReplace(item)">↶ Desfazer</button><button type="button" class="button outline small replace-item" :disabled="busy" @click="startReplace(item)" :aria-label="'Substituir '+item.titulo">↔ Substituir</button><button type="button" class="remove-item" :disabled="busy" @click="removeEditItem(item)" :aria-label="'Remover '+item.titulo">×</button></div>
                     </div>
                     <div class="item-fields"><label>Quantidade<input v-model.number="item.qtd" type="number" min="0.001" max="100000" step="0.001" inputmode="decimal"/></label><label class="note-input">Observação<input v-model="item.observacao" type="text" maxlength="500" placeholder="Ex.: 10 uva, 10 laranja e 10 limão"/></label><strong class="edit-line-total">{{money(itemValue(item))}}</strong></div>
@@ -391,7 +559,7 @@ onUnmounted(()=>{window.removeEventListener('popstate',popState);window.removeEv
                 </div>
               </div>
             </section>
-            <div class="editor-save-dock"><div class="dock-selection"><small>{{editItems.length}} {{editItems.length===1?'produto':'produtos'}} · Total estimado</small><strong>{{money(editTotal)}}</strong></div><button class="button primary" :disabled="busy" @click="save">{{busy?'Salvando...':'✓ Salvar lista'}}</button></div>
+            <div class="editor-save-dock"><div class="dock-selection"><small>{{editItems.length}} {{editItems.length===1?'produto':'produtos'}} · Total estimado</small><strong>{{money(editTotal)}}</strong><small class="editor-save-status" :class="editorStatus" role="status">{{editorStatusText}}</small></div><button class="button primary" :disabled="busy" @click="save">{{editorSaving?'Salvando...':'✓ Salvar lista'}}</button></div>
           </section>
         </template>
         <template v-else-if="page==='reports'">

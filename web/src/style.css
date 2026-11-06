@@ -505,3 +505,8 @@ body{background:var(--paper);color:var(--ink)}
  .page-jobs .source-row .source-actions .button{grid-column:auto;grid-row:auto}
  .page-jobs .source-fields{grid-template-columns:1fr}
 }
+
+/* Estado discreto do salvamento automático, inclusive na barra compacta móvel. */
+.editor-save-dock .editor-save-status{margin-top:4px;font-size:.66rem;color:#47745a;max-width:320px;line-height:1.3}
+.editor-save-dock .editor-save-status.pending,.editor-save-dock .editor-save-status.saving{color:#6c7486}
+.editor-save-dock .editor-save-status.error{color:#b53642}

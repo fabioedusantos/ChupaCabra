@@ -2,11 +2,21 @@
 
 ## Como funciona
 
-1. **Montar lista** funciona como antes: produtos, quantidades, observações, categoria e supermercado são reaproveitados da última lista. O preço exibido é o preço **atual disponível** no catálogo; se um produto desaparecer da raspagem, a tela utiliza o preço persistido no item (`saved.preco`) como referência.
+1. **Montar lista** salva automaticamente inclusões, exclusões, substituições, quantidades e observações, sem exigir o botão Salvar lista. Produtos, quantidades, observações, categoria e supermercado são reaproveitados da última lista. O preço exibido é o preço **atual disponível** no catálogo; se um produto desaparecer da raspagem, a tela utiliza o preço persistido no item (`saved.preco`) como referência.
 2. Durante as compras, marque cada item normalmente. Ao marcar o **último item**, abre-se a janela **Fechamento da compra**. Se ela for dispensada, o botão **Encerrar compra** continua disponível. Nada é registrado até confirmar o pagamento.
 3. Digite o **valor total efetivamente pago** nos cupons fiscais (ex.: `153,48`). Pode incluir uma breve observação para identificar aquela compra.
 4. Ao confirmar, a API verifica no banco que **todos os itens estão comprados**, grava de maneira **atômica** o cabeçalho, cada item com preço unitário estimado, quantidade, subtotal, categoria, mercado e observação, e **reinicia somente as marcações de comprado**. O conjunto de produtos da lista é mantido para a próxima ida ao mercado.
 5. Em **Relatórios**, escolha **este mês**, **3**, **6**, **9** ou **12 meses**. Esses intervalos são meses civis, incluindo o mês atual. Veja os totais estimado e gasto, a diferença, um gráfico mensal, tabela opcional e o detalhamento de cada compra.
+
+## Salvamento automático da lista
+
+- A montagem envia apenas os produtos alterados para `PATCH /api/shopping` (autenticado e protegido por CSRF); a API mantém `PUT /api/shopping` para compatibilidade. Não é necessária migração de banco.
+- Inclusões e exclusões são enviadas logo após a interação; alterações de quantidade, observação e substituição aguardam aproximadamente 650 ms sem nova digitação, evitando requisições por tecla.
+- A barra inferior indica **Salvando alterações**, **Salvo automaticamente**, **Alterações pendentes** ou uma mensagem de falha. O botão **Salvar lista** permanece como salvamento manual e retorno à compra.
+- Ao sair de **Montar lista** pelos controles internos, a aplicação aguarda a confirmação de gravação; se o servidor não confirmar ou a quantidade for inválida, mantém a tela para correção. Fechar a aba com alterações pendentes mostra o aviso nativo do navegador (quando suportado).
+- Em caso de falha de conexão, as alterações permanecem na tela para nova tentativa; quando a conexão retorna, a aplicação tenta salvar novamente. O indicador de sucesso aparece somente após resposta positiva da API.
+- A API modifica somente os IDs enviados: itens que outro familiar incluiu no mesmo período não são apagados, e a situação **comprado/pendente** é preservada. Se o produto foi excluído em outro dispositivo, retorna conflito em vez de recriá-lo silenciosamente.
+- Outras sessões devem atualizar a lista para receber mudanças remotas; esta implementação não adiciona WebSocket nem cria atualizações em tempo real entre dispositivos.
 
 ## O que significa economizar?
 

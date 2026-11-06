@@ -80,6 +80,10 @@ $app->put('/api/shopping',function(Request $rq,Response $rs) use($auth,$shopping
     if(!isset($data['items'])||!is_array($data['items']))throw new ApiException('Lista inválida.');
     return jsonResponse($rs,['items'=>$shopping->replace($data['items'])]);
 });
+$app->patch('/api/shopping',function(Request $rq,Response $rs) use($auth,$shopping) {
+    $auth->requireSession(true);
+    return jsonResponse($rs,$shopping->applyChanges(bodyData($rq)));
+});
 $app->patch('/api/shopping/{id}/purchase',function(Request $rq,Response $rs,array $args) use($auth,$shopping) {
     $auth->requireSession(true);$data=bodyData($rq);
     if(!array_key_exists('bought',$data)||!is_bool($data['bought']))throw new ApiException('Estado inválido.');
